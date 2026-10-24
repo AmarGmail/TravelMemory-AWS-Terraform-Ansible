@@ -1,0 +1,14 @@
+
+---
+- name: Update APT package index
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600 # Ensures that the package index is updated if it is older than 3600 seconds (1 hour).
+
+- name: Install common prerequisite packages
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - git
+    state: present # Ensures that the specified packages are installed on the target system.

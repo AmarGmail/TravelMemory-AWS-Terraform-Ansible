@@ -1,0 +1,96 @@
+---
+- name: Prepare the database server kernel
+  ansible.builtin.import_tasks: kernel.yml
+  
+- name: Install MongoDB repository prerequisites
+  ansible.builtin.apt:
+    name:
+      - gnupg
+      - curl
+    state: present
+    update_cache: true # Ensures that the package index is updated if it is older than 3600 seconds (1 hour).
+    cache_valid_time: 3600
+
+- name: Download MongoDB repository signing key
+  ansible.builtin.get_url:
+    url: "{{ mongodb_apt_key_url }}"
+    dest: /tmp/mongodb-server-8.0.asc
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Ensure keyring directory exists
+  ansible.builtin.file:
+    path: /usr/share/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Convert MongoDB signing key to GPG keyring format
+  ansible.builtin.command:
+    cmd: >-
+      gpg --dearmor --yes
+      --output {{ mongodb_apt_keyring }}
+      /tmp/mongodb-server-8.0.asc
+    creates: "{{ mongodb_apt_keyring }}"
+
+- name: Set MongoDB keyring permissions
+  ansible.builtin.file:
+    path: "{{ mongodb_apt_keyring }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Configure MongoDB APT repository
+  ansible.builtin.apt_repository:
+    repo: "{{ mongodb_apt_repository }}"
+    filename: mongodb-org-8.0
+    state: present
+    update_cache: true
+
+- name: Install MongoDB Community Edition
+  ansible.builtin.apt:
+    name: mongodb-org
+    state: present
+    update_cache: true
+
+- name: Enable and start MongoDB
+  ansible.builtin.service:
+    name: "{{ mongodb_service_name }}"
+    state: started
+    enabled: true
+
+- name: Verify MongoDB version
+  ansible.builtin.command:
+    cmd: mongod --version
+  register: mongodb_version_result
+  changed_when: false
+
+- name: Display MongoDB version
+  ansible.builtin.debug:
+    var: mongodb_version_result.stdout_lines
+
+#- name: Ensure MongoDB application user exists
+#  community.mongodb.mongodb_user:
+#    login_host: "127.0.0.1"
+#    login_port: 27017
+#    login_user: "{{ mongodb_admin_username }}"
+#    login_password: "{{ mongodb_admin_password }}"
+#    login_database: admin
+#    database: "{{ mongodb_app_database }}"
+#    name: "{{ mongodb_app_username }}"
+#    password: "{{ mongodb_app_password }}"
+#    roles:
+#      - db: "{{ mongodb_app_database }}"
+#        role: readWrite
+#    state: present
+#    update_password: on_create
+#    strict_compatibility: false
+#  register: mongodb_user_diagnostic
+#  failed_when: false
+#  no_log: true
+
+#- name: Display MongoDB user diagnostic message only
+#  ansible.builtin.debug:
+#    msg: "{{ mongodb_user_diagnostic.msg | default('No error message was returned') }}"

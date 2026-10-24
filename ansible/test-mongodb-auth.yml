@@ -1,0 +1,57 @@
+---
+- name: Validate TravelMemory MongoDB credentials
+  hosts: web
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ./vault/mongodb.yml
+
+  tasks:
+    - name: Test application credentials against MongoDB
+      ansible.builtin.shell: |
+        node <<'NODE'
+        const mongoose = require('mongoose');
+
+        const uri =
+          `mongodb://${process.env.APP_DB_USER}:${process.env.APP_DB_PASSWORD}` +
+          `@10.20.2.244:27017/${process.env.APP_DB_NAME}` +
+          `?authSource=${process.env.APP_DB_NAME}`;
+
+        (async () => {
+          try {
+            await mongoose.connect(uri, {
+              serverSelectionTimeoutMS: 7000
+            });
+            console.log("MongoDB authentication successful");
+            await mongoose.disconnect();
+          } catch (err) {
+            console.error(
+              "MongoDB authentication failed:",
+              err.codeName || err.name
+            );
+            process.exitCode = 1;
+          }
+        })();
+        NODE
+      args:
+        executable: /bin/bash
+        chdir: /opt/travelmemory/backend
+      environment:
+        APP_DB_USER: "{{ mongodb_app_username }}"
+        APP_DB_PASSWORD: "{{ mongodb_app_password }}"
+        APP_DB_NAME: "{{ mongodb_app_database }}"
+      register: mongodb_auth_check
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Report sanitized authentication result
+      ansible.builtin.assert:
+        that:
+          - mongodb_auth_check.rc == 0
+        success_msg: "Vault application credentials successfully authenticated to MongoDB."
+        fail_msg: >-
+          Authentication using the individual Vault credentials failed.
+          Check the app user's password and authentication database.
+

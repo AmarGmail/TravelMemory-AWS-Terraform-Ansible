@@ -1,0 +1,53 @@
+
+---
+- name: Install the known-working AWS kernel
+  ansible.builtin.apt:
+    name: linux-image-6.8.0-1067-aws
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Configure GRUB to use its saved default
+  ansible.builtin.lineinfile:
+    path: /etc/default/grub
+    regexp: '^GRUB_DEFAULT='
+    line: 'GRUB_DEFAULT=saved'
+  register: grub_default_config
+
+- name: Regenerate GRUB configuration when the default changes
+  ansible.builtin.command:
+    cmd: update-grub
+  when: grub_default_config.changed
+
+- name: Save the fallback kernel using stable menu titles
+  ansible.builtin.command:
+    argv:
+      - grub-set-default
+      - 'Advanced options for Ubuntu>Ubuntu, with Linux 6.8.0-1067-aws'
+  changed_when: false
+
+- name: Read the currently running kernel
+  ansible.builtin.command:
+    cmd: uname -r
+  register: kernel_before_reboot
+  changed_when: false
+
+- name: Reboot if the fallback kernel is not running
+  ansible.builtin.reboot:
+    reboot_timeout: 600
+    connect_timeout: 10
+  when: kernel_before_reboot.stdout != '6.8.0-1067-aws'
+
+- name: Verify the running kernel
+  ansible.builtin.command:
+    cmd: uname -r
+  register: running_kernel
+  changed_when: false
+
+- name: Require the known-working kernel
+  ansible.builtin.assert:
+    that:
+      - running_kernel.stdout == '6.8.0-1067-aws'
+    fail_msg: >-
+      Expected kernel 6.8.0-1067-aws, but found
+      {{ running_kernel.stdout }}. Stopping before MongoDB setup.

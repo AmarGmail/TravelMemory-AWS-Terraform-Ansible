@@ -1,0 +1,10 @@
+
+---
+- name: Deploy TravelMemory frontend and Nginx
+  hosts: web
+  become: true
+  gather_facts: true
+
+  roles:
+    - nginx
+

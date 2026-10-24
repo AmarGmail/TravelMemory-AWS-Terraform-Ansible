@@ -1,0 +1,11 @@
+---
+- name: Test TravelMemory role on web server
+  hosts: web
+  become: true
+  gather_facts: true
+
+  vars_files:
+    - ./vault/mongodb.yml
+
+  roles:
+    - travelmemory

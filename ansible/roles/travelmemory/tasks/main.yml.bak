@@ -1,0 +1,132 @@
+---
+- name: Install Node.js repository prerequisites
+  ansible.builtin.apt:
+    name:
+      - gnupg
+      - curl
+      - ca-certificates
+    state: present
+    update_cache: true # Ensures that the package index is updated if it is older than 3600 seconds (1 hour).
+    cache_valid_time: 3600
+
+- name: Download Node.js repository signing key
+  ansible.builtin.get_url:
+    url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
+    dest: /tmp/nodesource-repo.gpg.key
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Ensure keyring directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install NodeSource signing key
+  ansible.builtin.command:
+    cmd: >-
+      gpg --dearmor --yes
+      --output /etc/apt/keyrings/nodesource.gpg
+      /tmp/nodesource-repo.gpg.key
+    creates: /etc/apt/keyrings/nodesource.gpg
+
+- name: Set NodeSource signing key permissions
+  ansible.builtin.file:
+    path: /etc/apt/keyrings/nodesource.gpg
+    owner: root
+    group: root
+    mode: "0644"
+  
+- name: Configure Node.js 24 repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [signed-by=/etc/apt/keyrings/nodesource.gpg]
+      https://deb.nodesource.com/node_24.x nodistro main
+    filename: nodesource
+    state: present
+    update_cache: true
+
+- name: Install Node.js and bundled npm
+  ansible.builtin.apt:
+    name: nodejs
+    state: present
+    update_cache: true
+
+- name: Create TravelMemory backend directory
+  ansible.builtin.file:
+    path: /opt/travelmemory/backend
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy TravelMemory backend source files
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../backend/"
+    dest: /opt/travelmemory/backend/
+    owner: root
+    group: root
+    mode: preserve
+
+- name: Install TravelMemory backend dependencies
+  community.general.npm:
+    path: /opt/travelmemory/backend
+    ci: true
+    state: present
+
+- name: Create TravelMemory service group
+  ansible.builtin.group:
+    name: travelmemory
+    system: true
+    state: present
+
+- name: Create TravelMemory service user
+  ansible.builtin.user:
+    name: travelmemory
+    group: travelmemory
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+    state: present
+
+- name: Configure TravelMemory backend environment
+  ansible.builtin.copy:
+    content: |
+      PORT=3001
+      MONGO_URI={{ mongodb_uri }}
+    dest: /opt/travelmemory/backend/.env
+    owner: root
+    group: travelmemory
+    mode: "0640"
+  notify: Restart TravelMemory backend
+  no_log: true
+
+
+- name: Install TravelMemory backend systemd service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/travelmemory-backend.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=TravelMemory Node.js Backend
+      After=network.target
+
+      [Service]
+      Type=simple
+      WorkingDirectory=/opt/travelmemory/backend
+      ExecStart=/usr/bin/node /opt/travelmemory/backend/index.js
+      Restart=on-failure
+      RestartSec=5
+      EnvironmentFile=/opt/travelmemory/backend/.env
+      User=travelmemory
+      Group=travelmemory
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: Restart TravelMemory backend
+

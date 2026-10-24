@@ -1,0 +1,19 @@
+---
+- name: Prepare all servers
+  hosts: all
+  become: true
+  gather_facts: true
+
+  roles:
+    - common
+
+- name: Configure database server
+  hosts: database
+  become: true
+  gather_facts: true
+
+  vars_files:
+    - ./vault/mongodb.yml
+
+  roles:
+    - database

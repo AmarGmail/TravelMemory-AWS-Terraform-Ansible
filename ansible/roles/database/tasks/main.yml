@@ -1,0 +1,135 @@
+
+---
+- name: Prepare the database server kernel
+  ansible.builtin.import_tasks: kernel.yml
+
+- name: Install MongoDB repository prerequisites
+  ansible.builtin.apt:
+    name:
+      - gnupg
+      - curl
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Download MongoDB repository signing key
+  ansible.builtin.get_url:
+    url: "{{ mongodb_apt_key_url }}"
+    dest: /tmp/mongodb-server-8.0.asc
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Ensure keyring directory exists
+  ansible.builtin.file:
+    path: /usr/share/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Convert MongoDB signing key to GPG keyring format
+  ansible.builtin.command:
+    cmd: >-
+      gpg --dearmor --yes
+      --output {{ mongodb_apt_keyring }}
+      /tmp/mongodb-server-8.0.asc
+    creates: "{{ mongodb_apt_keyring }}"
+
+- name: Set MongoDB keyring permissions
+  ansible.builtin.file:
+    path: "{{ mongodb_apt_keyring }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Configure MongoDB APT repository
+  ansible.builtin.apt_repository:
+    repo: "{{ mongodb_apt_repository }}"
+    filename: mongodb-org-8.0
+    state: present
+    update_cache: true
+
+- name: Install MongoDB Community Edition
+  ansible.builtin.apt:
+    name: mongodb-org
+    state: present
+    update_cache: true
+
+- name: Enable and start MongoDB with its initial local-only configuration
+  ansible.builtin.service:
+    name: "{{ mongodb_service_name }}"
+    state: started
+    enabled: true
+
+- name: Check whether MongoDB users have already been bootstrapped
+  ansible.builtin.stat:
+    path: /etc/travelmemory-mongodb-users-bootstrapped
+  register: mongodb_bootstrap_marker
+
+- name: Bootstrap MongoDB users on first configuration
+  when: not mongodb_bootstrap_marker.stat.exists
+  block:
+    - name: Render temporary MongoDB user bootstrap script
+      ansible.builtin.template:
+        src: bootstrap_users.js.j2
+        dest: /root/travelmemory-mongodb-bootstrap.js
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+
+    - name: Create MongoDB administrator and application users
+      ansible.builtin.command:
+        argv:
+          - mongosh
+          - --quiet
+          - --file
+          - /root/travelmemory-mongodb-bootstrap.js
+      no_log: true
+
+    - name: Record successful MongoDB user bootstrap
+      ansible.builtin.file:
+        path: /etc/travelmemory-mongodb-users-bootstrapped
+        state: touch
+        owner: root
+        group: root
+        mode: "0600"
+
+  always:
+    - name: Remove temporary MongoDB bootstrap script
+      ansible.builtin.file:
+        path: /root/travelmemory-mongodb-bootstrap.js
+        state: absent
+
+- name: Configure MongoDB network binding and authentication
+  ansible.builtin.template:
+    src: mongod.conf.j2
+    dest: /etc/mongod.conf
+    owner: root
+    group: root
+    mode: "0644"
+  register: mongodb_config
+
+- name: Restart MongoDB when configuration changes
+  ansible.builtin.service:
+    name: "{{ mongodb_service_name }}"
+    state: restarted
+  when: mongodb_config.changed
+
+- name: Verify MongoDB version
+  ansible.builtin.command:
+    cmd: mongod --version
+  register: mongodb_version_result
+  changed_when: false
+
+- name: Display MongoDB version
+  ansible.builtin.debug:
+    var: mongodb_version_result.stdout_lines
+
+- name: Verify MongoDB service is active
+  ansible.builtin.command:
+    cmd: systemctl is-active mongod
+  register: mongodb_service_status
+  changed_when: false
+  failed_when: mongodb_service_status.stdout != "active"

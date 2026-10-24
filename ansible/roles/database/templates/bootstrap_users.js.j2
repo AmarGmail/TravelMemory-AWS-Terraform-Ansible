@@ -1,0 +1,29 @@
+const adminUsername = {{ mongodb_admin_username | to_json }};
+const adminPassword = {{ mongodb_admin_password | to_json }};
+const appUsername = {{ mongodb_app_username | to_json }};
+const appPassword = {{ mongodb_app_password | to_json }};
+const appDatabaseName = {{ mongodb_app_database | to_json }};
+
+const adminDb = db.getSiblingDB("admin");
+
+if (!adminDb.getUser(adminUsername)) {
+  adminDb.createUser({
+    user: adminUsername,
+    pwd: adminPassword,
+    roles: [
+      { role: "userAdminAnyDatabase", db: "admin" }
+    ]
+  });
+}
+
+const appDb = db.getSiblingDB(appDatabaseName);
+
+if (!appDb.getUser(appUsername)) {
+  appDb.createUser({
+    user: appUsername,
+    pwd: appPassword,
+    roles: [
+      { role: "readWrite", db: appDatabaseName }
+    ]
+  });
+}
