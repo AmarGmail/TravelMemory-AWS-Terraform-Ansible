@@ -11,12 +11,15 @@ Nginx serves the React frontend and reverse-proxies API requests to the Node.js/
 ## Architecture in a nut shell
 Internet -> EC2 public IP - >AWS Internet Gateway - > Public Subnet (10.20.1.0/24) -> EC2 Web Server (on Ubuntu 24.04 LTS)
  |
-                 +-----+------+
             
-               Nginx       Express API
-                 |          Port 3001
+      Nginx  NodeJS   Express API 
+      (public subnet) Port 3001
                  
-React Frontend - > Private VPC subnet -> Private Subnet (10.20.2.0/24) - > 
+React Frontend - > Private VPC subnet -> Private Subnet (10.20.2.0/24) - >
+|
+            
+      MongoDB (Private Subnet)
+      port 27017 
 EC2 MongoDB Database (on Ubuntu 24.04 LTS) -> MongoDB (Port 27017) 
 
 **<u>Network security:</u>** The database instance has no public IP address. Database access is restricted through security-group rules, and MongoDB authentication is enabled.
@@ -37,40 +40,11 @@ EC2 MongoDB Database (on Ubuntu 24.04 LTS) -> MongoDB (Port 27017)
 
 **Repository Structure**
 
-TravelMemory/
-├── terraform/
-│   ├── ami.tf
-│   ├── ec2.tf
-│   ├── iam.tf
-│   ├── network.tf
-│   ├── outputs.tf
-│   ├── providers.tf
-│   ├── security_groups.tf
-│   ├── variables.tf
-│   └── versions.tf
-├── ansible/
-│   ├── ansible.cfg
-│   ├── inventory/
-│   ├── group_vars/
-│   ├── playbooks/
-│   │   └── site.yml
-│   ├── roles/
-│   │   ├── common/
-│   │   ├── database/
-│   │   ├── travelmemory/
-│   │   └── nginx/
-│   ├── test-mongodb-auth.yml
-│   ├── test-nginx.yml
-│   ├── test-travelmemory-role.yml
-│   └── vault/
-├── backend/
-├── frontend/
-├── screenshots/
-├── .gitignore
-└── README.md
+![Repo](screenshots/repo.png)
 
-### Expected outcome of the app
-
+### Expected outcome
+![frontendUI](screenshots/travelmemoryfrontend.png)
+![addexprienceUI](screenshots/AddExperience.png)
 
 ## Prepare git repo
 Create a clone from source repo
@@ -142,7 +116,8 @@ aws ec2 create-key-pair \
   --query 'KeyMaterial' \
   --output text > ~/.ssh/travelmemory-lab-key.pem
 ```
-Provision AWS infrastructure. Initially, terraform failed due to syntax error in iam.tf at creating IAM role which was corrected and run terraform apply again to complete the infra provisioning in AWS platform.
+**Provision AWS infrastructure** - The initial Terraform apply failed because of a syntax error in iam.tf while defining the IAM role. After correcting the configuration, Terraform apply was executed again and infrastructure provisioning completed successfully.
+**Idempotency verification:** A subsequent Terraform plan reported no changes, confirming that the provisioned infrastructure matched the Terraform configuration at the time of verification.
 ```
 hi@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible/TravelMemory/terraform$ terraform apply travelmemory.tfplan
 aws_iam_role.ec2: Creating...
@@ -238,7 +213,7 @@ hi@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible/TravelMemory/ter
 +----------------------+----------+-------------+-----------------+
 ```
 
-## #Part II: Ansible 
+## #Part-II: Ansible 
 
 ```
 hi@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible/TravelMemory/ansible$ ansible --version
@@ -252,6 +227,7 @@ ansible [core 2.16.3]
   jinja version = 3.1.2
   libyaml = True
   ```
+  Web and DB servers added in seperate group
   ```
   hi@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible/TravelMemory/ansible$ ansible-inventory --graph
   @all:
@@ -261,7 +237,7 @@ ansible [core 2.16.3]
   |--@database:
   |  |--db1
 ```
-
+List ansible inventory
 ```
 hi@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible/TravelMemory/ansible$ ansible-inventory --list
 {
@@ -301,6 +277,8 @@ hi@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible/TravelMemory/ans
     }
 }
 ```
+Validate WEB and DB connecivity.
+The **DB** server usages the web as **SSH JumpBox** or **SSH ProxyJump** as it resides in private subnet as per [hosts.ini](ansible/inventory/hosts.ini)
 ```
 hi@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible/TravelMemory/ansible$ ansible web -m ansible.builtin.ping
 web1 | SUCCESS => {
@@ -314,6 +292,7 @@ db1 | SUCCESS => {
     "ping": "pong"
 }
 ```
+Perform ansible dry run to connect both APP and DB host and gather OS info.
 ```
 hi@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible/TravelMemory/ansible$ ansible-playbook playbooks/site.yml
 
@@ -341,7 +320,7 @@ PLAY RECAP *********************************************************************
 db1                        : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
 web1                       : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
 ```
-
+**Install [common Prerequsites](ansible/roles/common/tasks/main.yml)** 
 ```
 hi@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible/TravelMemory/ansible$ ansible-playbook playbooks/site.yml
 
@@ -363,7 +342,7 @@ PLAY RECAP *********************************************************************
 db1                        : ok=3    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
 web1                       : ok=3    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
 ```
-
+**Install MongoDB on database host only (--limit database).**
 ```
 hi@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible/TravelMemory/ansible$ ansible-playbook playbooks/site.yml --limit database
 
@@ -432,6 +411,7 @@ ok: [db1] => {
 PLAY RECAP *************************************************************************************************************
 db1                        : ok=14   changed=5    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
 ```
+**[Install nodejs on web host](ansible/roles/travelmemory/tasks/main.yml)**
 ```
 hi@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible/TravelMemory/ansible$ ansible-playbook test-travelmemory-role.yml
 
@@ -464,7 +444,7 @@ changed: [web1]
 PLAY RECAP *************************************************************************************************************
 web1                       : ok=8    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
 ```
-
+**Verify nodejs and npm versions**
 ```
 hi@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible/TravelMemory/ansible$ ansible web -m ansible.builtin.command -a "node --version"
 web1 | CHANGED | rc=0 >>
@@ -473,7 +453,7 @@ hi@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible/TravelMemory/ans
 web1 | CHANGED | rc=0 >>
 11.19.1
 ```
-
+**[Deploy travelmemory backend after updating the playbook and adding a simple service method to manage backend](ansible/roles/travelmemory/tasks/main.yml)**
 ```
 hi@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible/TravelMemory/ansible$ ansible-playbook test-travelmemory-role.yml
 
@@ -511,7 +491,9 @@ changed: [web1]
 
 PLAY RECAP *************************************************************************************************************
 web1                       : ok=10   changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
-
+```
+***Use ansible builtin command to vaidate the backend in web server*** 
+```
 hi@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible/TravelMemory/ansible$ ansible web -m ansible.builtin.command \
   -a "find /opt/travelmemory/backend -maxdepth 3 -type f"
 web1 | CHANGED | rc=0 >>
@@ -565,6 +547,7 @@ changed: [web1]
 PLAY RECAP *************************************************************************************************************
 web1                       : ok=11   changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
 ```
+use ansible vault to hide DB password
 
 ```
 hi@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible/TravelMemory/ansible$ ansible-playbook test-travelmemory-role.yml --ask-vault-pass
@@ -682,7 +665,7 @@ PLAY RECAP *********************************************************************
 web1                       : ok=16   changed=6    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
 ```
 
-App deployment status:
+**App deployment status:**
 ```
 hi@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible/TravelMemory/ansible$ ansible web -m ansible.builtin.uri \
   -a "url=http://127.0.0.1:3001/hello method=GET status_code=200"
@@ -704,7 +687,7 @@ web1 | SUCCESS => {
     "x_powered_by": "Express"
 }
 ```
-service logs
+**backend service logs**
 ```
 i@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible/TravelMemory/ansible$ ansible web -b -m ansible.builtin.command \
   -a "journalctl -u travelmemory-backend.service -n 30 --no-pager"
@@ -712,7 +695,7 @@ web1 | CHANGED | rc=0 >>
 Oct 22 18:47:46 ip-10-20-1-78 systemd[1]: Started travelmemory-backend.service - TravelMemory Node.js Backend.
 Oct 22 18:47:47 ip-10-20-1-78 node[16737]: Server started at http://localhost:3001
 ```
-INstall nginx:
+**[Install nginx: deploy frontend build](ansible/roles/nginx/tasks/main.yml)**
 ```
 hi@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible/TravelMemory/ansible$ ansible-playbook test-nginx.yml
 
@@ -748,6 +731,7 @@ changed: [web1]
 PLAY RECAP *************************************************************************************************************
 web1                       : ok=9    changed=7    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
 ```
+**Verify nginx installation**
 ```
 hi@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible/TravelMemory/ansible$ ansible web -b -m command -a "nginx -t"
 web1 | CHANGED | rc=0 >>
@@ -802,20 +786,20 @@ web1 | SUCCESS => {
     "x_powered_by": "Express"
 }
 ```
+## **#Synopsis**
 
-###common — prepare both servers.
+- **ansible/roles/common** — prepare both servers.
+- **ansible/roles/database** — configure MongoDB on the private DB server.
+- **ansible/roles/travelmemory** — deploy the backend on the web server.
+- **ansible/roles/nginx** — deploy the frontend and configure the reverse proxy.
 
-###database — configure MongoDB on the private DB server.
+**#Playbook execution**
 
-###travelmemory — deploy the backend on the web server.
+- **Play 1** — Prepare all servers: common prerequisites on both EC2 instances.
 
-###nginx — deploy the frontend and configure the reverse proxy.
+- **Play 2** — Configure database server: MongoDB setup on db1.
 
-###Play 1 — Prepare all servers: common prerequisites on both EC2 instances.
-
-###Play 2 — Configure database server: MongoDB setup on db1.
-
-###Play 3 — Deploy TravelMemory application on web server: backend deployment first, followed by Nginx and the frontend.
+- **Play 3** — Deploy TravelMemory application on web server: backend deployment first, followed by Nginx and the frontend.
 
 ```
 -------------------------------------------------------------------------------------------------------------------------------------------------
@@ -827,56 +811,8 @@ web1 | SUCCESS => {
 |  i-0599b6841dc355028|  2026-10-23T12:36:18+00:00 |  travelmemory-db  |  10.20.2.244 |  None          |  running  |  subnet-0b73db5c3ed6ac5ce  |
 +---------------------+----------------------------+-------------------+--------------+----------------+-----------+----------------------------+
 ```
-## **#NAT-Gateway** and Outbound Connectivity
+### **#NAT-Gateway** and Outbound Connectivity
 The NAT Gateway was initially provisioned by Terraform and later deleted manually from AWS, together with its Elastic IP, to remove the associated cost. This was performed after MongoDB server that residing in private subnet configured and tested. THe objective is to reduce the cost assiciated with a NAT gateway.
 The application continued working because ordinary web requests use the Internet Gateway to reach the public web server, while the backend connects to MongoDB through private VPC networking.
 
 
-
-`.env` file to work with the backend after creating a database in mongodb: 
-
-```
-MONGO_URI='ENTER_YOUR_URL'
-PORT=3001
-```
-
-Data format to be added: 
-
-```json
-{
-    "tripName": "Incredible India",
-    "startDateOfJourney": "19-03-2022",
-    "endDateOfJourney": "27-03-2022",
-    "nameOfHotels":"Hotel Namaste, Backpackers Club",
-    "placesVisited":"Delhi, Kolkata, Chennai, Mumbai",
-    "totalCost": 800000,
-    "tripType": "leisure",
-    "experience": "Lorem Ipsum, Lorem Ipsum,Lorem Ipsum,Lorem Ipsum,Lorem Ipsum,Lorem Ipsum,Lorem Ipsum,Lorem Ipsum,Lorem Ipsum,Lorem Ipsum,Lorem Ipsum,Lorem Ipsum,Lorem Ipsum,Lorem Ipsum,Lorem Ipsum,Lorem Ipsum,Lorem Ipsum,Lorem Ipsum,Lorem Ipsum,Lorem Ipsum,Lorem Ipsum,Lorem Ipsum,Lorem Ipsum,Lorem Ipsum,Lorem Ipsum,Lorem Ipsum,Lorem Ipsum, ",
-    "image": "https://t3.ftcdn.net/jpg/03/04/85/26/360_F_304852693_nSOn9KvUgafgvZ6wM0CNaULYUa7xXBkA.jpg",
-    "shortDescription":"India is a wonderful country with rich culture and good people.",
-    "featured": true
-}
-```
-
-
-For frontend, you need to create `.env` file and put the following content (remember to change it based on your requirements):
-```bash
-REACT_APP_BACKEND_URL=http://localhost:3001
-```
-
-## How to run BE
-
-Note: Make sure you have the .env file already added
-```bash
-cd backend
-npm install
-node index.js
-```
-
-## How to run FE
-Note: Make sure you have the .env file already added
-```bash
-cd frontend
-npm install
-npm start
-```
