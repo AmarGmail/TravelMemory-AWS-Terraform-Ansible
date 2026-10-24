@@ -1,7 +1,79 @@
-# Travel Memory
+# Travel Memory - AWS Deployment with Terraform and Ansible
+
+**TravelMemory** - MERN application
+**Terraform** -  infrastructure provisioning
+**Ansible** - configuration management and application deployment
+**AWS** - Deployment platform. It's a two Tier deployment.
+
+The deployment separates the public web/application tier from the private MongoDB database tier. 
+Nginx serves the React frontend and reverse-proxies API requests to the Node.js/Express backend.
+
+## Architecture in a nut shell
+Internet -> EC2 public IP - >AWS Internet Gateway - > Public Subnet (10.20.1.0/24) -> EC2 Web Server (on Ubuntu 24.04 LTS)
+ |
+                 +-----+------+
+            
+               Nginx       Express API
+                 |          Port 3001
+                 
+React Frontend - > Private VPC subnet -> Private Subnet (10.20.2.0/24) - > 
+EC2 MongoDB Database (on Ubuntu 24.04 LTS) -> MongoDB (Port 27017) 
+
+**<u>Network security:</u>** The database instance has no public IP address. Database access is restricted through security-group rules, and MongoDB authentication is enabled.
+
+**<u>Technology Stack</u>**
+
+- Cloud: Amazon Web Services (AWS)
+- Infrastructure as Code: Terraform
+- Configuration Management: Ansible
+- Compute: Amazon EC2
+- Networking: VPC, public/private subnets,   Internet Gateway, route tables and security - groups
+- Frontend: React
+- Backend: Node.js and Express
+- Database: MongoDB Community Edition
+- Web Server / Reverse Proxy: Nginx
+- Service Management: systemd
+- Secrets Management: Ansible Vault
+
+**Repository Structure**
+
+TravelMemory/
+├── terraform/
+│   ├── ami.tf
+│   ├── ec2.tf
+│   ├── iam.tf
+│   ├── network.tf
+│   ├── outputs.tf
+│   ├── providers.tf
+│   ├── security_groups.tf
+│   ├── variables.tf
+│   └── versions.tf
+├── ansible/
+│   ├── ansible.cfg
+│   ├── inventory/
+│   ├── group_vars/
+│   ├── playbooks/
+│   │   └── site.yml
+│   ├── roles/
+│   │   ├── common/
+│   │   ├── database/
+│   │   ├── travelmemory/
+│   │   └── nginx/
+│   ├── test-mongodb-auth.yml
+│   ├── test-nginx.yml
+│   ├── test-travelmemory-role.yml
+│   └── vault/
+├── backend/
+├── frontend/
+├── screenshots/
+├── .gitignore
+└── README.md
+
+### Expected outcome of the app
+
 
 ## Prepare git repo
-Create a clone of source repo
+Create a clone from source repo
 ```
 hi@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible$ git clone https://github.com/UnpredictablePrashant/TravelMemory.git
 Cloning into 'TravelMemory'...
@@ -58,7 +130,7 @@ Your branch is up to date with 'origin/main'.
 nothing to commit, working tree clean
 ```
 
-## Part 1: Infrastructure Setup with Terraform
+## #Part-1: Infrastructure Setup with Terraform
 
 Create a dedicated key-pair for this assigment
 ```
@@ -70,6 +142,7 @@ aws ec2 create-key-pair \
   --query 'KeyMaterial' \
   --output text > ~/.ssh/travelmemory-lab-key.pem
 ```
+Provision AWS infrastructure. Initially, terraform failed due to syntax error in iam.tf at creating IAM role which was corrected and run terraform apply again to complete the infra provisioning in AWS platform.
 ```
 hi@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible/TravelMemory/terraform$ terraform apply travelmemory.tfplan
 aws_iam_role.ec2: Creating...
@@ -151,7 +224,7 @@ selected_ami_name = "ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-2
 web_public_dns = "ec2-35-175-110-90.compute-1.amazonaws.com"
 web_public_ip = "35.175.110.90"
 ```
-
+Get EC2 instances IP addresses for both WEB and DB tier - 
 ```
 hi@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible/TravelMemory/terraform$ aws ec2 describe-instances \
   --instance-ids i-017eb13b95de53d63 i-0be7cf059073c2b26 \
@@ -165,7 +238,7 @@ hi@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible/TravelMemory/ter
 +----------------------+----------+-------------+-----------------+
 ```
 
-Part II: Ansible
+## #Part II: Ansible 
 
 ```
 hi@USER:~/projects/herovired/assignments/MERN-Terraform-Ansible/TravelMemory/ansible$ ansible --version
@@ -743,6 +816,20 @@ web1 | SUCCESS => {
 ###Play 2 — Configure database server: MongoDB setup on db1.
 
 ###Play 3 — Deploy TravelMemory application on web server: backend deployment first, followed by Nginx and the frontend.
+
+```
+-------------------------------------------------------------------------------------------------------------------------------------------------
+|                                                               DescribeInstances                                                               |
++---------------------+----------------------------+-------------------+--------------+----------------+-----------+----------------------------+
+|     InstanceId      |        LaunchTime          |       Name        |  PrivateIP   |   PublicIP     |   State   |          Subnet            |
++---------------------+----------------------------+-------------------+--------------+----------------+-----------+----------------------------+
+|  i-0d9c10401b236ed91|  2026-10-23T12:36:18+00:00 |  travelmemory-web |  10.20.1.109 |  44.195.88.225 |  running  |  subnet-0d7fbe94f60ac89ee  |
+|  i-0599b6841dc355028|  2026-10-23T12:36:18+00:00 |  travelmemory-db  |  10.20.2.244 |  None          |  running  |  subnet-0b73db5c3ed6ac5ce  |
++---------------------+----------------------------+-------------------+--------------+----------------+-----------+----------------------------+
+```
+## **#NAT-Gateway** and Outbound Connectivity
+The NAT Gateway was initially provisioned by Terraform and later deleted manually from AWS, together with its Elastic IP, to remove the associated cost. This was performed after MongoDB server that residing in private subnet configured and tested. THe objective is to reduce the cost assiciated with a NAT gateway.
+The application continued working because ordinary web requests use the Internet Gateway to reach the public web server, while the backend connects to MongoDB through private VPC networking.
 
 
 
